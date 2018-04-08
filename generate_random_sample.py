@@ -9,6 +9,7 @@ from game_controller import GameEnv
 
 
 def collect_sample(num_samples, q, pid):
+    print('Process %d start' % pid)
     print_every = 100
     env = GameEnv()
     sample_count = 0
@@ -21,7 +22,7 @@ def collect_sample(num_samples, q, pid):
             time.sleep(env.interval_time)
             last_obs = env.get_observation()
         action = env.sample_action()
-        obs, done, reward = env.perform_action(action, verbose=True)
+        obs, done, reward = env.perform_action(action)
         if obs is None:
             # Taken last operation make game almost failure, we just mark it was done
             # and mark last sample's reward to be -1
