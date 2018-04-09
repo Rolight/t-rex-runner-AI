@@ -2,13 +2,15 @@ import argparse
 import threading
 import time
 import json
+import os
 
-from multiprocessing import Process, Queue
+from multiprocessing import Process
 
 from game_controller import GameEnv
 
 
-def collect_sample(num_samples, q, pid):
+def collect_sample(num_samples, output, pid):
+    print('Process %d start' % pid)
     print_every = 100
     env = GameEnv()
     sample_count = 0
@@ -21,7 +23,7 @@ def collect_sample(num_samples, q, pid):
             time.sleep(env.interval_time)
             last_obs = env.get_observation()
         action = env.sample_action()
-        obs, done, reward = env.perform_action(action, verbose=True)
+        obs, done, reward = env.perform_action(action)
         if obs is None:
             # Taken last operation make game almost failure, we just mark it was done
             # and mark last sample's reward to be -1
@@ -40,7 +42,8 @@ def collect_sample(num_samples, q, pid):
         if sample_count % print_every == 0:
             print('Process %d have collected %d samples.' %
                   (pid, sample_count))
-    q.put(samples)
+    with open('%s-%d' % (output, pid), 'w') as f:
+        f.write(json.dumps(samples))
 
 
 def main():
@@ -52,12 +55,11 @@ def main():
     args = parser.parse_args()
     num_samples_each_thread = args.num_samples // args.num_threads
     processes = []
-    q = Queue()
     for pid in range(args.num_threads):
         if pid == args.num_threads - 1:
             num_samples_each_thread += args.num_samples % args.num_threads
         p = Process(target=collect_sample, args=(
-            num_samples_each_thread, q, pid))
+            num_samples_each_thread, args.output, pid))
         processes.append(p)
 
     for p in processes:
@@ -66,9 +68,13 @@ def main():
     for p in processes:
         p.join()
 
+    print('all process finished, writing data to output file...')
     all_samples = []
-    for p in processes:
-        all_samples += q.get()
+    for pid in range(args.num_threads):
+        with open('%s-%d' % (args.output, pid), 'r') as f:
+            cur_samples = json.loads(f.read())
+            all_samples += cur_samples
+        os.remove('%s-%d' % (args.output, pid))
     with open(args.output, 'w') as f:
         f.write(json.dumps(all_samples))
 
