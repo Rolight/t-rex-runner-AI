@@ -4,6 +4,7 @@ import pickle
 import json
 import numpy as np
 import os
+import argparse
 from pathlib import Path
 
 from models import NNDynamicModel, MPCcontroller
@@ -12,7 +13,7 @@ from game_controller import GameEnv
 
 DYNAMIC_MODEL_PARAMS = {
     'l2_regularizer_scale': 1e-5,
-    'activation': 'relu',
+    'activation': 'tanh',
     'output_activation': None,
     'learning_rate': 0.003,
     'batch_size': 128,
@@ -180,3 +181,19 @@ class TrainJob:
         while True:
             self.train_loop()
             self.save()
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--name', '-n', type=str, required=False)
+    args = parser.parse_args()
+    if args.name is not None:
+        job = TrainJob(name=args.name)
+    else:
+        job = TrainJob()
+
+    job.train()
+
+
+if __name__ == '__main__':
+    main()
