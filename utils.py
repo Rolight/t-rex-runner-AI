@@ -4,8 +4,7 @@ import numpy as np
 import pickle
 import os
 import time
-
-from multiprocessing import Process
+import subprocess
 
 
 def build_mlp(input_placeholder,
@@ -33,10 +32,10 @@ def load_sample_data(path):
 
 class DataBuffer:
 
-    def __init__(self, init_data, limit):
+    def __init__(self, init_data, data_dim, limit):
         # YOU SHOULDN'T MODIFY BUFFER LIMIT AT ANY TIME
         self._limit = limit
-        self._data = np.empty(shape=(self._limit, ), dtype=np.object)
+        self._data = np.empty(shape=(self._limit, data_dim), dtype=np.object)
         self._tail = 0
         self.add_data(init_data)
 
@@ -67,88 +66,21 @@ class DataBuffer:
         return str(self)
 
 
-def _collect_sample_with_mpc_thread(num_samples, output, train_job_name):
-    from game_controller import GameEnv
-    from models import NNDynamicModel, MPCcontroller
-    import tensorflow as tf
-
-    '''
-        step 1. make a new dyn_model and load add all parameters
-    '''
-    sess = tf.Session()
-    print('Loading dyn_model from disk...')
-    # loading params
-    with open('./%s/dyn_model/params.pkl' % train_job_name, 'rb') as f:
-        dyn_model_params = pickle.dump(f)
-    print('Model parameter has loaded from %s' %
-          ('./%s/dyn_model/params.pkl' % train_job_name))
-    # building graph
-    dyn_model = NNDynamicModel(
-        sess=sess, **dyn_model_params)
-    # restore model
-    saver = tf.train.Saver()
-    saver.restore(sess, './%s/dyn_model/model.ckpt' % train_job_name)
-
-    '''
-        step 2. init a new mpc controller with dyn_model
-    '''
-
-    mpc = MPCcontroller(dyn_model=dyn_model)
-
-    '''
-        step 3. create a new env and collect samples
-    '''
-    print_every = 100
-    env = GameEnv()
-    sample_count = 0
-    env.start()
-    last_obs = env.get_observation()
-    obs = None
-    samples = []
-    while sample_count < num_samples:
-        while last_obs is None:
-            time.sleep(env.interval_time)
-            last_obs = env.get_observation()
-        # using mpc controller to get action
-        action = mpc.get_action(last_obs)
-        obs, done, reward = env.perform_action(action)
-        if obs is None:
-            # Taken last operation make game almost failure, we just mark it was done
-            # and mark last sample's reward to be -1
-            done = True
-            samples[-1][-1] = -1
-        else:
-            samples.append(
-                [last_obs.tolist(), action.tolist(), obs.tolist(), reward])
-            sample_count += 1
-        if done:
-            env.restart()
-            last_obs = None
-        else:
-            last_obs = obs
-
-        if sample_count % print_every == 0:
-            print('Process %s have collected %d samples.' %
-                  (output, sample_count))
-    with open(output, 'w') as f:
-        f.write(json.dumps(samples))
-
-
 def collect_sample_with_mpc(num_samples, num_threads, train_job_name):
     num_samples_each_thread = num_samples // num_threads
     processes = []
     for pid in range(num_threads):
         if pid == num_threads - 1:
             num_samples_each_thread += num_samples % num_threads
-        p = Process(target=_collect_sample_with_mpc_thread, args=(
-            num_samples_each_thread, 'sample_process_%d' % pid, train_job_name))
+        p = subprocess.Popen(
+            ['python', 'generate_sample_with_mpc.py',
+             '--num_samples', str(num_samples_each_thread),
+             '--output', 'sample_process_%d' % pid,
+             '--train_job_name', train_job_name])
         processes.append(p)
 
     for p in processes:
-        p.start()
-
-    for p in processes:
-        p.join()
+        p.wait()
 
     print('all process finished, collecting data from output file...')
     all_samples = []

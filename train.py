@@ -11,8 +11,8 @@ from utils import load_sample_data, DataBuffer, collect_sample_with_mpc
 from game_controller import GameEnv
 
 DYNAMIC_MODEL_PARAMS = {
-    'kernel_regularizer': tf.contrib.layers.l2_regularizer(scale=1e-5),
-    'activation': tf.nn.relu,
+    'l2_regularizer_scale': 1e-5,
+    'activation': 'relu',
     'output_activation': None,
     'learning_rate': 0.003,
     'batch_size': 128,
@@ -59,15 +59,24 @@ class TrainJob:
             If you don't have this file, you need to run generate_random_sample to create one
         '''
         init_data = load_sample_data(SAMPLE_DATA_PATH)
-        self.db = DataBuffer(init_data, DATABUFFER_LIMIT)
+        data_dim = len(init_data[0])
+        self.db = DataBuffer(init_data, data_dim, DATABUFFER_LIMIT)
 
     def init_dyn_model(self):
         '''
             Init a new dyn model with DYNAMIC_MODEL_PARAMS
         '''
         self.dyn_model_params = DYNAMIC_MODEL_PARAMS
+        init_data = self.db.sample()
+        obs = [d[0] for d in init_data]
+        normalization = [np.min(obs, axis=0), np.max(
+            obs, axis=0), np.mean(obs, axis=0)]
+        self.dyn_model_params.update({
+            'normalization': normalization,
+            'name': self.name
+        })
         self.dyn_model = NNDynamicModel(
-            name=self.name, sess=self.sess, **self.dyn_model_params)
+            sess=self.sess, **self.dyn_model_params)
 
     def init_mpc_controller(self):
         '''
@@ -95,7 +104,7 @@ class TrainJob:
         print('Saving databuffer to disk...')
         path = Path('./%s/' % self.name)
         path.mkdir(parents=True, exist_ok=True)
-        with open('./%s/data_buffer.pkl', 'wb') as f:
+        with open('./%s/data_buffer.pkl' % self.name, 'wb') as f:
             pickle.dump(self.db, f)
         print('DataBuffer has saved to %s' %
               ('./%s/data_buffer.pkl' % self.name))
@@ -105,7 +114,7 @@ class TrainJob:
         path = Path('./%s/' % self.name)
         path.mkdir(parents=True, exist_ok=True)
         self.params['name'] = self.name
-        with open('./%s/parameters.pkl', 'wb') as f:
+        with open('./%s/parameters.pkl' % self.name, 'wb') as f:
             pickle.dump(self.params, f)
         print('Training parameters has saved to %s' %
               ('./%s/parameters.pkl' % self.name))
@@ -116,7 +125,7 @@ class TrainJob:
 
     def load_data_buffer(self):
         print('Loading databuffer from disk...')
-        with open('./%s/data_buffer.pkl', 'rb') as f:
+        with open('./%s/data_buffer.pkl' % self.name, 'rb') as f:
             self.db = pickle.load(f)
         print('DataBuffer has loaded from %s' %
               ('./%s/data_buffer.pkl' % self.name))
@@ -125,7 +134,7 @@ class TrainJob:
         print('Loading dyn_model from disk...')
         # loading params
         with open('./%s/dyn_model/params.pkl' % self.name, 'rb') as f:
-            self.dyn_model_params = pickle.dump(f)
+            self.dyn_model_params = pickle.load(f)
         print('Model parameter has loaded from %s' %
               ('./%s/dyn_model/params.pkl' % self.name))
         # building graph
@@ -137,7 +146,7 @@ class TrainJob:
 
     def load(self):
         print('Loading training parameters from disk...')
-        with open('./%s/parameters.pkl', 'rb') as f:
+        with open('./%s/parameters.pkl' % self.name, 'rb') as f:
             self.params = pickle.load(f)
         print('Training parameters has loaded from %s' %
               ('./%s/parameters.pkl' % self.name))
@@ -157,7 +166,9 @@ class TrainJob:
         '''
         data = collect_sample_with_mpc(
             num_samples=self.params['collect_data_size'],
-            num_threads=self.params['collect_threads'])
+            num_threads=self.params['collect_threads'],
+            train_job_name=self.name,
+        )
         self.db.add_data(data)
         self.save_dataBuffer()
 
@@ -165,6 +176,7 @@ class TrainJob:
         if not self.dyn_model.initialized:
             initialize = tf.global_variables_initializer()
             self.sess.run(initialize)
+            self.dyn_model.initialized = True
         while True:
             self.train_loop()
             self.save()

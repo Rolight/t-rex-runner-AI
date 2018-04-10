@@ -19,7 +19,7 @@ class NNDynamicModel:
                  size,
                  activation,
                  output_activation,
-                 kernel_regularizer,
+                 l2_regularizer_scale,
                  normalization,
                  batch_size,
                  iterations,
@@ -34,6 +34,10 @@ class NNDynamicModel:
         self.iter = iterations
         self.name = name
         self.env_conf = env_conf
+
+        kernel_regularizer = tf.contrib.layers.l2_regularizer(
+            scale=l2_regularizer_scale)
+        activation = getattr(tf.nn, activation)
 
         self.mlp_params = {
             'scope': 'nndym-%s' % name,
