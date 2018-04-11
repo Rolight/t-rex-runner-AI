@@ -78,22 +78,31 @@ class NNDynamicModel:
         action_inputs = {}
         action_outputs = {}
         for action_id in range(self.env_conf['action_type_size']):
-            mask = (inputs[:, self.env_conf['observation_dim']] == action_id)
-            action_inputs[action_id] = tf.boolean_mask(inputs, mask)
+            mask = tf.equal(inputs[:, self.env_conf['observation_dim']], action_id)
+            cur_inputs = tf.boolean_mask(inputs, mask)
+            cur_inputs = tf.concat(
+                [
+                    cur_inputs[:, :-self.env_conf['action_dim']],
+                    cur_inputs[:, -self.env_conf['action_dim'] + 1:]
+                ],
+                axis=1
+            )
+            action_inputs[action_id] = cur_inputs
             action_outputs[action_id] = tf.boolean_mask(outputs, mask)
 
         self.train_inputs = action_inputs
         self.train_outputs = action_outputs
 
     def add_prediction_op(self):
-        pred = {}
-        for action_id in range(self.env_conf['action_type_size']):
-            pred[action_id] = build_mlp(
+        pred = [
+            build_mlp(
                 input_placeholder=self.train_inputs[action_id],
                 output_size=2,
                 scope='nndym-%s-action-%d' % (self.name, action_id),
                 **self.mlp_params
             )
+            for action_id in range(self.env_conf['action_type_size'])
+        ]
         return pred
 
     def add_loss_op(self, pred):
@@ -108,7 +117,7 @@ class NNDynamicModel:
     def add_train_op(self, loss):
         train_op = [
             tf.train.AdamOptimizer(
-                learning_rate=self.learning_rate
+                learning_rate=self.learning_rate[action_id]
             ).minimize(loss[action_id])
             for action_id in range(self.env_conf['action_type_size'])
         ]
@@ -124,7 +133,7 @@ class NNDynamicModel:
         obs[:, 1:] = obs[:, 1:] * (max_obs[1:] - min_obs[1:]) + mean_obs[1:]
         return obs
 
-    def fit(self, data):
+    def fit(self, data, print_every=10):
         """
         data format: [[obs, action, next_obs, reward]]
         """
@@ -147,17 +156,28 @@ class NNDynamicModel:
                     self.label_placeholder: output_batch,
                 })
                 losses.append(loss)
-            print('on iter_step %d, loss = %s' %
-                  (iter_step, np.mean(losses)))
+            if iter_step % print_every == 0:
+                print('on iter_step %d, loss = %s' %
+                      (iter_step, np.mean(losses, axis=0)))
 
     def predict(self, states, actions):
+        pred = np.empty(dtype=np.float, shape=(len(states), 2))
         states = np.array(states)
         states = self.normalize_obs(states)
-        inputs = np.concatenate([states, actions], axis=1)
-        pred = self.sess.run(tf.nn.softmax(self.pred), feed_dict={
+        actions = np.array(actions)
+        inputs = np.concatenate(
+            [states, actions],
+            axis=1)
+        action_pred = self.sess.run(self.pred, feed_dict={
             self.input_placeholder: inputs
         })
-        return pred
+        for action_id in range(self.env_conf['action_type_size']):
+            pred[actions[:, 0] == action_id, :] = action_pred[action_id]
+        return self._softmax(pred)
+
+    def _softmax(self, vec):
+        exp_vec = np.exp(vec)
+        return exp_vec / np.sum(exp_vec, axis=1, keepdims=True)
 
 
 class MPCcontroller:
@@ -186,7 +206,9 @@ class MPCcontroller:
                    self.env_conf['observation_dim']))
         observations[:, :] = state
         rewards = self.dyn_model.predict(observations, actions)
-        return actions[np.argmax(rewards)]
+
+        dead_p = rewards[:, -1]
+        return actions[np.argmin(dead_p)]
         '''
         select mpc optimal action
         for rewards, we perfer which reward is > 0
