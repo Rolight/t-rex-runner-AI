@@ -40,7 +40,6 @@ class NNDynamicModel:
         activation = getattr(tf.nn, activation)
 
         self.mlp_params = {
-            'scope': 'nndym-%s' % name,
             'n_layers': n_layers,
             'size': size,
             'activation': activation,
@@ -72,26 +71,47 @@ class NNDynamicModel:
             shape=[None]
         )
 
-    def add_prediction_op(self):
         inputs = self.input_placeholder
-        pred = build_mlp(
-            input_placeholder=inputs,
-            output_size=2,
-            **self.mlp_params
-        )
+        outputs = self.label_placeholder
+        # convert reward [-1, 1] to 0, 1
+        outputs = (outputs + 1) // 2
+        action_inputs = {}
+        action_outputs = {}
+        for action_id in range(self.env_conf['action_type_size']):
+            mask = (inputs[:, self.env_conf['observation_dim']] == action_id)
+            action_inputs[action_id] = tf.boolean_mask(inputs, mask)
+            action_outputs[action_id] = tf.boolean_mask(outputs, mask)
+
+        self.train_inputs = action_inputs
+        self.train_outputs = action_outputs
+
+    def add_prediction_op(self):
+        pred = {}
+        for action_id in range(self.env_conf['action_type_size']):
+            pred[action_id] = build_mlp(
+                input_placeholder=self.train_inputs[action_id],
+                output_size=2,
+                scope='nndym-%s-action-%d' % (self.name, action_id),
+                **self.mlp_params
+            )
         return pred
 
     def add_loss_op(self, pred):
-        labels = (self.label_placeholder + 1) // 2
-        loss = tf.reduce_mean(tf.losses.sparse_softmax_cross_entropy(
-            labels=labels, logits=pred
-        ))
+        loss = [
+            tf.reduce_mean(tf.losses.sparse_softmax_cross_entropy(
+                labels=self.train_outputs[action_id], logits=pred[action_id],
+            ))
+            for action_id in range(self.env_conf['action_type_size'])
+        ]
         return loss
 
     def add_train_op(self, loss):
-        train_op = tf.train.AdamOptimizer(
-            learning_rate=self.learning_rate
-        ).minimize(loss)
+        train_op = [
+            tf.train.AdamOptimizer(
+                learning_rate=self.learning_rate
+            ).minimize(loss[action_id])
+            for action_id in range(self.env_conf['action_type_size'])
+        ]
         return train_op
 
     def normalize_obs(self, obs):
@@ -127,8 +147,8 @@ class NNDynamicModel:
                     self.label_placeholder: output_batch,
                 })
                 losses.append(loss)
-            print('on iter_step %d, loss = %0.7f, max_loss = %0.7f, min_loss = %0.7f' %
-                  (iter_step, np.mean(losses), np.max(losses), np.min(losses)))
+            print('on iter_step %d, loss = %s' %
+                  (iter_step, np.mean(losses)))
 
     def predict(self, states, actions):
         states = np.array(states)
