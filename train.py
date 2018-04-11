@@ -60,6 +60,7 @@ class TrainJob:
             If you don't have this file, you need to run generate_random_sample to create one
         '''
         init_data = load_sample_data(SAMPLE_DATA_PATH)
+        init_data = self.clean(init_data)
         data_dim = len(init_data[0])
         self.db = DataBuffer(init_data, data_dim, DATABUFFER_LIMIT)
 
@@ -170,7 +171,7 @@ class TrainJob:
             num_threads=self.params['collect_threads'],
             train_job_name=self.name,
         )
-        self.db.add_data(data)
+        self.db.add_data(self.clean(data))
         self.save_dataBuffer()
 
     def train(self):
@@ -181,6 +182,13 @@ class TrainJob:
         while True:
             self.train_loop()
             self.save()
+
+    def clean(self, raw_data):
+        '''
+            remove invalid data
+        '''
+        data = [d for d in raw_data if d[0][1] > 0]
+        return data
 
 
 def main():

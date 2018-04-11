@@ -18,13 +18,13 @@ class NNDynamicModel:
                  n_layers,
                  size,
                  activation,
-                 output_activation,
                  l2_regularizer_scale,
                  normalization,
                  batch_size,
                  iterations,
                  learning_rate,
                  sess,
+                 output_activation,
                  env_conf=ENV_CONF
                  ):
         # base parameters
@@ -66,24 +66,25 @@ class NNDynamicModel:
                    self.env_conf['action_dim']]
         )
 
-        # label [observation_delta, reward]
+        # label [reward]
         self.label_placeholder = tf.placeholder(
-            dtype=tf.float32,
-            shape=[None, self.env_conf['observation_dim'] + 1]
+            dtype=tf.int32,
+            shape=[None]
         )
 
     def add_prediction_op(self):
         inputs = self.input_placeholder
         pred = build_mlp(
             input_placeholder=inputs,
-            output_size=self.label_placeholder.shape[1],
+            output_size=2,
             **self.mlp_params
         )
         return pred
 
     def add_loss_op(self, pred):
-        loss = tf.reduce_mean(tf.square(
-            pred - self.label_placeholder
+        labels = (self.label_placeholder + 1) // 2
+        loss = tf.reduce_mean(tf.losses.sparse_softmax_cross_entropy(
+            labels=labels, logits=pred
         ))
         return loss
 
@@ -110,9 +111,7 @@ class NNDynamicModel:
         inputs_data = np.array([d[0] + d[1] for d in data])
         obs_len = len(data[0][0])
         inputs_data[:, :obs_len] = self.normalize_obs(inputs_data[:, :obs_len])
-        outputs_data = np.array([d[2] + [d[3]] for d in data])
-        outputs_data[:, :obs_len] = self.normalize_obs(
-            outputs_data[:, :obs_len])
+        outputs_data = np.array([d[-1] for d in data])
         train_indicies = np.arange(len(data))
         for iter_step in range(self.iter):
             np.random.shuffle(train_indicies)
@@ -128,19 +127,17 @@ class NNDynamicModel:
                     self.label_placeholder: output_batch,
                 })
                 losses.append(loss)
-            print('on iter_step %d, loss = %0.7f' %
-                  (iter_step, np.mean(losses)))
+            print('on iter_step %d, loss = %0.7f, max_loss = %0.7f, min_loss = %0.7f' %
+                  (iter_step, np.mean(losses), np.max(losses), np.min(losses)))
 
     def predict(self, states, actions):
         states = np.array(states)
         states = self.normalize_obs(states)
         inputs = np.concatenate([states, actions], axis=1)
-        pred = self.sess.run(self.pred, feed_dict={
+        pred = self.sess.run(tf.nn.softmax(self.pred), feed_dict={
             self.input_placeholder: inputs
         })
-        pred[:, :-1] = self.recover_obs(pred[:, :-1])
-        nxt_states, rewards = pred[:, :-1], pred[:, -1]
-        return nxt_states, rewards
+        return pred
 
 
 class MPCcontroller:
@@ -168,8 +165,8 @@ class MPCcontroller:
             shape=(self.sample_size * self.env_conf['action_type_size'],
                    self.env_conf['observation_dim']))
         observations[:, :] = state
-        nobs, rewards = self.dyn_model.predict(observations, actions)
-        return actions[np.argmax(nobs[:, -1])]
+        rewards = self.dyn_model.predict(observations, actions)
+        return actions[np.argmax(rewards)]
         '''
         select mpc optimal action
         for rewards, we perfer which reward is > 0
