@@ -60,16 +60,19 @@ class TrainJob:
             If you don't have this file, you need to run generate_random_sample to create one
         '''
         init_data = load_sample_data(SAMPLE_DATA_PATH)
-        init_data = self.clean(init_data)
         data_dim = len(init_data[0])
-        self.db = DataBuffer(init_data, data_dim, DATABUFFER_LIMIT)
+        init_pdata, init_ndata = self.clean(init_data)
+        self.db = [
+            DataBuffer(init_pdata, data_dim, DATABUFFER_LIMIT),
+            DataBuffer(init_ndata, data_dim, DATABUFFER_LIMIT),
+        ]
 
     def init_dyn_model(self):
         '''
             Init a new dyn model with DYNAMIC_MODEL_PARAMS
         '''
         self.dyn_model_params = DYNAMIC_MODEL_PARAMS
-        init_data = self.db.sample()
+        init_data = np.concatenate([d.sample() for d in self.db], axis=0)
         obs = [d[0] for d in init_data]
         normalization = [np.min(obs, axis=0), np.max(
             obs, axis=0), np.mean(obs, axis=0)]
@@ -158,7 +161,11 @@ class TrainJob:
             step 1. Train dynamic model with sample data.
                     After training, save model to disk.
         '''
-        data = self.db.sample(sample_size=self.params['sample_size'])
+        data = np.concatenate(
+            [d.sample(sample_size=self.params['sample_size'])
+             for d in self.db],
+            axis=0
+        )
         self.dyn_model.fit(data)
         self.save_dyn_model()
         '''
@@ -187,8 +194,9 @@ class TrainJob:
         '''
             remove invalid data
         '''
-        data = [d for d in raw_data if d[0][1] > 0]
-        return data
+        pdata = [d for d in raw_data if d[0][1] > 0 and d[-1] > 0]
+        ndata = [d for d in raw_data if d[0][1] > 0 and d[-1] < 0]
+        return pdata, ndata
 
 
 def main():
