@@ -178,7 +178,9 @@ class TrainJob:
             num_threads=self.params['collect_threads'],
             train_job_name=self.name,
         )
-        self.db.add_data(self.clean(data))
+        pdata, ndata = self.clean(data)
+        self.db[0].add_data(pdata)
+        self.db[1].add_data(ndata)
         self.save_dataBuffer()
 
     def train(self):
