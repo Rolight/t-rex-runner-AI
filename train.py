@@ -15,11 +15,11 @@ DYNAMIC_MODEL_PARAMS = {
     'l2_regularizer_scale': 1e-5,
     'activation': 'tanh',
     'output_activation': None,
-    'learning_rate': 0.003,
+    'learning_rate': [0.001, 0.001, 0.001],
     'batch_size': 128,
     'n_layers': 3,
     'size': 128,
-    'iterations': 40
+    'iterations': 100
 }
 
 SAMPLE_DATA_PATH = './sample.json'
