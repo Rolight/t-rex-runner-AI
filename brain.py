@@ -21,6 +21,7 @@ def run(brain_name):
         action = mpc.get_action(last_obs)
         obs, done, reward = env.perform_action(action)
         if done:
+            break
             env.restart()
             last_obs = None
         else:

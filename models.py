@@ -4,8 +4,7 @@ import numpy as np
 from utils import build_mlp
 
 ENV_CONF = {
-    'action_dim': 2,
-    'action_type_size': 3,
+    'action_dim': 2, 'action_type_size': 3,
     'action_hold_time_limit': 1,
     'observation_dim': 5
 }
@@ -188,8 +187,7 @@ class MPCcontroller:
         self.env_conf = env_conf
 
     def get_random_actions(self, action_type):
-        actions = np.empty(
-            shape=(self.sample_size, self.env_conf['action_dim']))
+        actions = np.empty( shape=(self.sample_size, self.env_conf['action_dim']))
         actions[:, 0] = action_type
         actions[:, 1] = np.random.uniform(
             low=0, high=self.env_conf['action_hold_time_limit'],
@@ -197,17 +195,19 @@ class MPCcontroller:
         return actions
 
     def get_action(self, state):
-        actions = np.concatenate([
-            self.get_random_actions(action_type)
-            for action_type in range(self.env_conf['action_type_size'])
-        ], axis=0)
+        actions = []
+        for action_id in range(self.env_conf['action_type_size']):
+            for hold_time in range(1, self.sample_size + 1):
+                actions.append([action_id, 1 / self.sample_size * hold_time])
         observations = np.empty(
             shape=(self.sample_size * self.env_conf['action_type_size'],
                    self.env_conf['observation_dim']))
+        actions = np.array(actions)
         observations[:, :] = state
         rewards = self.dyn_model.predict(observations, actions)
+        np.set_printoptions(suppress=False)
 
-        dead_p = rewards[:, -1]
+        dead_p = rewards[:, 0]
         return actions[np.argmin(dead_p)]
         '''
         select mpc optimal action
