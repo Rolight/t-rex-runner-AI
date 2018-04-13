@@ -148,6 +148,7 @@ class TrainJob:
         # restore model
         saver = tf.train.Saver()
         saver.restore(self.sess, './%s/dyn_model/model.ckpt' % self.name)
+        self.dyn_model.initialized = True
 
     def load(self):
         print('Loading training parameters from disk...')
