@@ -1,5 +1,5 @@
 from game_controller import GameEnv
-from models import NNDynamicModel, MPCcontroller
+from models import NNDynamicModel, MPCcontroller, HeuristicMPCcontroller
 import tensorflow as tf
 import time
 import json
@@ -29,7 +29,9 @@ def collect_sample_with_mpc_thread(num_samples, output, train_job_name):
         step 2. init a new mpc controller with dyn_model
     '''
 
-    mpc = MPCcontroller(dyn_model=dyn_model)
+    # mpc = MPCcontroller(dyn_model=dyn_model)
+    mpc = HeuristicMPCcontroller(
+        dyn_model=dyn_model, min_tolerance=0.999)
 
     '''
         step 3. create a new env and collect samples
