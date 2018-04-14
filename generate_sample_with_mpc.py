@@ -30,9 +30,7 @@ def collect_sample_with_mpc_thread(num_samples, output, train_job_name):
         step 2. init a new mpc controller with dyn_model
     '''
 
-    # mpc = MPCcontroller(dyn_model=dyn_model)
-    mpc = HeuristicMPCcontroller(
-        dyn_model=dyn_model, min_tolerance=0.999)
+    mpc = MPCcontroller(dyn_model=dyn_model)
 
     '''
         step 3. create a new env and collect samples
