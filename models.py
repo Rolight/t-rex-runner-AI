@@ -7,7 +7,8 @@ ENV_CONF = {
     'action_dim': 2,
     'action_type_size': 3,
     'action_hold_time_limit': 1,
-    'observation_dim': 5
+    'observation_dim': 5,
+    'interval_time': 1 / 60
 }
 
 
@@ -18,13 +19,13 @@ class NNDynamicModel:
                  n_layers,
                  size,
                  activation,
-                 output_activation,
                  l2_regularizer_scale,
                  normalization,
                  batch_size,
                  iterations,
                  learning_rate,
                  sess,
+                 output_activation,
                  env_conf=ENV_CONF
                  ):
         # base parameters
@@ -40,7 +41,6 @@ class NNDynamicModel:
         activation = getattr(tf.nn, activation)
 
         self.mlp_params = {
-            'scope': 'nndym-%s' % name,
             'n_layers': n_layers,
             'size': size,
             'activation': activation,
@@ -66,31 +66,63 @@ class NNDynamicModel:
                    self.env_conf['action_dim']]
         )
 
-        # label [observation_delta, reward]
+        # label [reward]
         self.label_placeholder = tf.placeholder(
-            dtype=tf.float32,
-            shape=[None, self.env_conf['observation_dim'] + 1]
+            dtype=tf.int32,
+            shape=[None]
         )
 
-    def add_prediction_op(self):
         inputs = self.input_placeholder
-        pred = build_mlp(
-            input_placeholder=inputs,
-            output_size=self.label_placeholder.shape[1],
-            **self.mlp_params
-        )
+        outputs = self.label_placeholder
+        # convert reward [-1, 1] to 0, 1
+        outputs = (outputs + 1) // 2
+        action_inputs = {}
+        action_outputs = {}
+        for action_id in range(self.env_conf['action_type_size']):
+            mask = tf.equal(
+                inputs[:, self.env_conf['observation_dim']], action_id)
+            cur_inputs = tf.boolean_mask(inputs, mask)
+            cur_inputs = tf.concat(
+                [
+                    cur_inputs[:, :-self.env_conf['action_dim']],
+                    cur_inputs[:, -self.env_conf['action_dim'] + 1:]
+                ],
+                axis=1
+            )
+            action_inputs[action_id] = cur_inputs
+            action_outputs[action_id] = tf.boolean_mask(outputs, mask)
+
+        self.train_inputs = action_inputs
+        self.train_outputs = action_outputs
+
+    def add_prediction_op(self):
+        pred = [
+            build_mlp(
+                input_placeholder=self.train_inputs[action_id],
+                output_size=2,
+                scope='nndym-%s-action-%d' % (self.name, action_id),
+                **self.mlp_params
+            )
+            for action_id in range(self.env_conf['action_type_size'])
+        ]
         return pred
 
     def add_loss_op(self, pred):
-        loss = tf.reduce_mean(tf.square(
-            pred - self.label_placeholder
-        ))
+        loss = [
+            tf.reduce_mean(tf.losses.sparse_softmax_cross_entropy(
+                labels=self.train_outputs[action_id], logits=pred[action_id],
+            ))
+            for action_id in range(self.env_conf['action_type_size'])
+        ]
         return loss
 
     def add_train_op(self, loss):
-        train_op = tf.train.AdamOptimizer(
-            learning_rate=self.learning_rate
-        ).minimize(loss)
+        train_op = [
+            tf.train.AdamOptimizer(
+                learning_rate=self.learning_rate[action_id]
+            ).minimize(loss[action_id])
+            for action_id in range(self.env_conf['action_type_size'])
+        ]
         return train_op
 
     def normalize_obs(self, obs):
@@ -103,16 +135,14 @@ class NNDynamicModel:
         obs[:, 1:] = obs[:, 1:] * (max_obs[1:] - min_obs[1:]) + mean_obs[1:]
         return obs
 
-    def fit(self, data):
+    def fit(self, data, print_every=10):
         """
         data format: [[obs, action, next_obs, reward]]
         """
         inputs_data = np.array([d[0] + d[1] for d in data])
         obs_len = len(data[0][0])
         inputs_data[:, :obs_len] = self.normalize_obs(inputs_data[:, :obs_len])
-        outputs_data = np.array([d[2] + [d[3]] for d in data])
-        outputs_data[:, :obs_len] = self.normalize_obs(
-            outputs_data[:, :obs_len])
+        outputs_data = np.array([d[-1] for d in data])
         train_indicies = np.arange(len(data))
         for iter_step in range(self.iter):
             np.random.shuffle(train_indicies)
@@ -128,19 +158,28 @@ class NNDynamicModel:
                     self.label_placeholder: output_batch,
                 })
                 losses.append(loss)
-            print('on iter_step %d, loss = %0.7f' %
-                  (iter_step, np.mean(losses)))
+            if iter_step % print_every == 0:
+                print('on iter_step %d, loss = %s' %
+                      (iter_step, np.mean(losses, axis=0)))
 
     def predict(self, states, actions):
+        pred = np.empty(dtype=np.float, shape=(len(states), 2))
         states = np.array(states)
         states = self.normalize_obs(states)
-        inputs = np.concatenate([states, actions], axis=1)
-        pred = self.sess.run(self.pred, feed_dict={
+        actions = np.array(actions)
+        inputs = np.concatenate(
+            [states, actions],
+            axis=1)
+        action_pred = self.sess.run(self.pred, feed_dict={
             self.input_placeholder: inputs
         })
-        pred[:, :-1] = self.recover_obs(pred[:, :-1])
-        nxt_states, rewards = pred[:, :-1], pred[:, -1]
-        return nxt_states, rewards
+        for action_id in range(self.env_conf['action_type_size']):
+            pred[actions[:, 0] == action_id, :] = action_pred[action_id]
+        return self._softmax(pred)
+
+    def _softmax(self, vec):
+        exp_vec = np.exp(vec)
+        return exp_vec / np.sum(exp_vec, axis=1, keepdims=True)
 
 
 class MPCcontroller:
@@ -160,16 +199,22 @@ class MPCcontroller:
         return actions
 
     def get_action(self, state):
-        actions = np.concatenate([
-            self.get_random_actions(action_type)
-            for action_type in range(self.env_conf['action_type_size'])
-        ], axis=0)
+        actions = []
+        for action_id in range(self.env_conf['action_type_size']):
+            for hold_time in range(1, self.sample_size + 1):
+                actions.append([action_id, 1 / self.sample_size * hold_time])
         observations = np.empty(
             shape=(self.sample_size * self.env_conf['action_type_size'],
                    self.env_conf['observation_dim']))
+        actions = np.array(actions)
         observations[:, :] = state
-        nobs, rewards = self.dyn_model.predict(observations, actions)
-        return actions[np.argmax(nobs[:, -1])]
+        rewards = self.dyn_model.predict(observations, actions)
+        np.set_printoptions(suppress=True)
+        print(np.concatenate([actions, rewards], axis=1))
+        print(state)
+
+        dead_p = rewards[:, 0]
+        return actions[np.argmin(dead_p)]
         '''
         select mpc optimal action
         for rewards, we perfer which reward is > 0
@@ -185,3 +230,60 @@ class MPCcontroller:
         actions.sort(axis=0)
         return actions[0]
         '''
+
+
+class HeuristicMPCcontroller(MPCcontroller):
+
+    def __init__(self, dyn_model, sample_size=20, min_tolerance=0.9, env_conf=ENV_CONF):
+        super().__init__(dyn_model, sample_size, env_conf)
+        self.min_tolerance = min_tolerance
+
+    def get_action(self, state):
+        def get_action_and_alive_p(state):
+            actions = []
+            for action_id in range(self.env_conf['action_type_size']):
+                for hold_time in range(1, self.sample_size + 1):
+                    actions.append(
+                        [action_id, 1 / self.sample_size * hold_time])
+            observations = np.empty(
+                shape=(self.sample_size * self.env_conf['action_type_size'],
+                       self.env_conf['observation_dim']))
+            actions = np.array(actions)
+            observations[:, :] = state
+            rewards = self.dyn_model.predict(observations, actions)
+            best_action_id = None
+            max_alive_p = 0
+            for action_id in range(len(actions)):
+                if max_alive_p >= self.min_tolerance:
+                    break
+                if rewards[action_id, 1] > max_alive_p:
+                    max_alive_p = rewards[action_id][1]
+                    best_action_id = action_id
+            print('select action ',
+                  actions[best_action_id], ' alive_p: ', max_alive_p)
+            return actions[best_action_id], max_alive_p
+
+        # State: [type, xPos, yPos, width, v]
+        if state[0] == 1 and state[2] <= 51:
+            action = [0, 0.2]
+            return action
+        if state[1] > 200:
+            action = [0, self.env_conf['interval_time']]
+            return action
+        action, max_alive_p = get_action_and_alive_p(state)
+        if max_alive_p >= self.min_tolerance:
+            return action
+
+        # Heuristic Search for best action
+        width = state[3]
+        while width < 150 and max_alive_p < self.min_tolerance:
+            width += 5
+            print('add width to %d' % width)
+            new_state = np.array(state)
+            new_state[3] = width
+            cur_action, cur_max_alive_p = get_action_and_alive_p(new_state)
+            if cur_max_alive_p > max_alive_p:
+                max_alive_p = cur_max_alive_p
+                action = cur_action
+        print('get max_alive_p ', max_alive_p)
+        return action

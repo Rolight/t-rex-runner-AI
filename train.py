@@ -15,11 +15,11 @@ DYNAMIC_MODEL_PARAMS = {
     'l2_regularizer_scale': 1e-5,
     'activation': 'tanh',
     'output_activation': None,
-    'learning_rate': 0.003,
+    'learning_rate': [0.001, 0.001, 0.001],
     'batch_size': 128,
     'n_layers': 3,
     'size': 128,
-    'iterations': 40
+    'iterations': 100
 }
 
 SAMPLE_DATA_PATH = './sample.json'
@@ -61,14 +61,18 @@ class TrainJob:
         '''
         init_data = load_sample_data(SAMPLE_DATA_PATH)
         data_dim = len(init_data[0])
-        self.db = DataBuffer(init_data, data_dim, DATABUFFER_LIMIT)
+        init_pdata, init_ndata = self.clean(init_data)
+        self.db = [
+            DataBuffer(init_pdata, data_dim, DATABUFFER_LIMIT),
+            DataBuffer(init_ndata, data_dim, DATABUFFER_LIMIT),
+        ]
 
     def init_dyn_model(self):
         '''
             Init a new dyn model with DYNAMIC_MODEL_PARAMS
         '''
         self.dyn_model_params = DYNAMIC_MODEL_PARAMS
-        init_data = self.db.sample()
+        init_data = np.concatenate([d.sample() for d in self.db], axis=0)
         obs = [d[0] for d in init_data]
         normalization = [np.min(obs, axis=0), np.max(
             obs, axis=0), np.mean(obs, axis=0)]
@@ -144,6 +148,7 @@ class TrainJob:
         # restore model
         saver = tf.train.Saver()
         saver.restore(self.sess, './%s/dyn_model/model.ckpt' % self.name)
+        self.dyn_model.initialized = True
 
     def load(self):
         print('Loading training parameters from disk...')
@@ -157,7 +162,11 @@ class TrainJob:
             step 1. Train dynamic model with sample data.
                     After training, save model to disk.
         '''
-        data = self.db.sample(sample_size=self.params['sample_size'])
+        data = np.concatenate(
+            [d.sample(sample_size=self.params['sample_size'])
+             for d in self.db],
+            axis=0
+        )
         self.dyn_model.fit(data)
         self.save_dyn_model()
         '''
@@ -170,7 +179,9 @@ class TrainJob:
             num_threads=self.params['collect_threads'],
             train_job_name=self.name,
         )
-        self.db.add_data(data)
+        pdata, ndata = self.clean(data)
+        self.db[0].add_data(pdata)
+        self.db[1].add_data(ndata)
         self.save_dataBuffer()
 
     def train(self):
@@ -181,6 +192,14 @@ class TrainJob:
         while True:
             self.train_loop()
             self.save()
+
+    def clean(self, raw_data):
+        '''
+            remove invalid data
+        '''
+        pdata = [d for d in raw_data if d[0][1] > 0 and d[-1] > 0]
+        ndata = [d for d in raw_data if d[0][1] > 0 and d[-1] < 0]
+        return pdata, ndata
 
 
 def main():
