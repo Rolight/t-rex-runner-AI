@@ -4,9 +4,11 @@ import numpy as np
 from utils import build_mlp
 
 ENV_CONF = {
-    'action_dim': 2, 'action_type_size': 3,
+    'action_dim': 2,
+    'action_type_size': 3,
     'action_hold_time_limit': 1,
-    'observation_dim': 5
+    'observation_dim': 5,
+    'interval_time': 1 / 60
 }
 
 
@@ -77,7 +79,8 @@ class NNDynamicModel:
         action_inputs = {}
         action_outputs = {}
         for action_id in range(self.env_conf['action_type_size']):
-            mask = tf.equal(inputs[:, self.env_conf['observation_dim']], action_id)
+            mask = tf.equal(
+                inputs[:, self.env_conf['observation_dim']], action_id)
             cur_inputs = tf.boolean_mask(inputs, mask)
             cur_inputs = tf.concat(
                 [
@@ -187,7 +190,8 @@ class MPCcontroller:
         self.env_conf = env_conf
 
     def get_random_actions(self, action_type):
-        actions = np.empty( shape=(self.sample_size, self.env_conf['action_dim']))
+        actions = np.empty(
+            shape=(self.sample_size, self.env_conf['action_dim']))
         actions[:, 0] = action_type
         actions[:, 1] = np.random.uniform(
             low=0, high=self.env_conf['action_hold_time_limit'],
@@ -205,7 +209,9 @@ class MPCcontroller:
         actions = np.array(actions)
         observations[:, :] = state
         rewards = self.dyn_model.predict(observations, actions)
-        np.set_printoptions(suppress=False)
+        np.set_printoptions(suppress=True)
+        print(np.concatenate([actions, rewards], axis=1))
+        print(state)
 
         dead_p = rewards[:, 0]
         return actions[np.argmin(dead_p)]
@@ -224,3 +230,60 @@ class MPCcontroller:
         actions.sort(axis=0)
         return actions[0]
         '''
+
+
+class HeuristicMPCcontroller(MPCcontroller):
+
+    def __init__(self, dyn_model, sample_size=20, min_tolerance=0.9, env_conf=ENV_CONF):
+        super().__init__(dyn_model, sample_size, env_conf)
+        self.min_tolerance = min_tolerance
+
+    def get_action(self, state):
+        def get_action_and_alive_p(state):
+            actions = []
+            for action_id in range(self.env_conf['action_type_size']):
+                for hold_time in range(1, self.sample_size + 1):
+                    actions.append(
+                        [action_id, 1 / self.sample_size * hold_time])
+            observations = np.empty(
+                shape=(self.sample_size * self.env_conf['action_type_size'],
+                       self.env_conf['observation_dim']))
+            actions = np.array(actions)
+            observations[:, :] = state
+            rewards = self.dyn_model.predict(observations, actions)
+            best_action_id = None
+            max_alive_p = 0
+            for action_id in range(len(actions)):
+                if max_alive_p >= self.min_tolerance:
+                    break
+                if rewards[action_id, 1] > max_alive_p:
+                    max_alive_p = rewards[action_id][1]
+                    best_action_id = action_id
+            print('select action ',
+                  actions[best_action_id], ' alive_p: ', max_alive_p)
+            return actions[best_action_id], max_alive_p
+
+        # State: [type, xPos, yPos, width, v]
+        if state[0] == 1 and state[2] <= 51:
+            action = [0, 0.2]
+            return action
+        if state[1] > 200:
+            action = [0, self.env_conf['interval_time']]
+            return action
+        action, max_alive_p = get_action_and_alive_p(state)
+        if max_alive_p >= self.min_tolerance:
+            return action
+
+        # Heuristic Search for best action
+        width = state[3]
+        while width < 150 and max_alive_p < self.min_tolerance:
+            width += 5
+            print('add width to %d' % width)
+            new_state = np.array(state)
+            new_state[3] = width
+            cur_action, cur_max_alive_p = get_action_and_alive_p(new_state)
+            if cur_max_alive_p > max_alive_p:
+                max_alive_p = cur_max_alive_p
+                action = cur_action
+        print('get max_alive_p ', max_alive_p)
+        return action
