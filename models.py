@@ -256,9 +256,15 @@ class HeuristicMPCcontroller(MPCcontroller):
             for action_id in range(len(actions)):
                 if max_alive_p >= self.min_tolerance:
                     break
+                # xPos < 90
+                if state[1] < 90 and actions[action_id][0] < 1:
+                    continue
                 if rewards[action_id, 1] > max_alive_p:
                     max_alive_p = rewards[action_id][1]
                     best_action_id = action_id
+            if best_action_id is None:
+                best_action_id = np.argmax(rewards[:, 1])
+                max_alive_p = rewards[best_action_id, 1]
             print('select action ',
                   actions[best_action_id], ' alive_p: ', max_alive_p)
             return actions[best_action_id], max_alive_p
