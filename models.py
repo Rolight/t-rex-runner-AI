@@ -209,10 +209,6 @@ class MPCcontroller:
         actions = np.array(actions)
         observations[:, :] = state
         rewards = self.dyn_model.predict(observations, actions)
-        np.set_printoptions(suppress=True)
-        print(np.concatenate([actions, rewards], axis=1))
-        print(state)
-
         dead_p = rewards[:, 0]
         return actions[np.argmin(dead_p)]
         '''
@@ -265,8 +261,6 @@ class HeuristicMPCcontroller(MPCcontroller):
             if best_action_id is None:
                 best_action_id = np.argmax(rewards[:, 1])
                 max_alive_p = rewards[best_action_id, 1]
-            print('select action ',
-                  actions[best_action_id], ' alive_p: ', max_alive_p)
             return actions[best_action_id], max_alive_p
 
         # State: [type, xPos, yPos, width, v]
@@ -284,12 +278,10 @@ class HeuristicMPCcontroller(MPCcontroller):
         width = state[3]
         while width < 150 and max_alive_p < self.min_tolerance:
             width += 5
-            print('add width to %d' % width)
             new_state = np.array(state)
             new_state[3] = width
             cur_action, cur_max_alive_p = get_action_and_alive_p(new_state)
             if cur_max_alive_p > max_alive_p:
                 max_alive_p = cur_max_alive_p
                 action = cur_action
-        print('get max_alive_p ', max_alive_p)
         return action
