@@ -5,6 +5,7 @@ import time
 import json
 import pickle
 import argparse
+import numpy as np
 
 
 def collect_sample_with_mpc_thread(num_samples, output, train_job_name):
@@ -49,6 +50,7 @@ def collect_sample_with_mpc_thread(num_samples, output, train_job_name):
             last_obs = env.get_observation()
         # using mpc controller to get action
         action = mpc.get_action(last_obs)
+        action = np.array(action)
         obs, done, reward = env.perform_action(action)
         if obs is None:
             # Taken last operation make game almost failure, we just mark it was done
