@@ -28,7 +28,7 @@ DATABUFFER_LIMIT = 50000
 TRAIN_PARAMETERS = {
     'sample_size': 30000,
     'collect_data_size': 8000,
-    'collect_threads': 4
+    'collect_threads': 16
 }
 
 

@@ -8,7 +8,7 @@ import argparse
 import numpy as np
 
 
-def collect_sample_with_mpc_thread(num_samples, output, train_job_name):
+def collect_sample_with_mpc_thread(num_samples, output, train_job_name, headless):
     '''
         step 1. make a new dyn_model and load add all parameters
     '''
@@ -37,7 +37,7 @@ def collect_sample_with_mpc_thread(num_samples, output, train_job_name):
         step 3. create a new env and collect samples
     '''
     print_every = 100
-    env = GameEnv()
+    env = GameEnv(headless=headless, offline=True)
     sample_count = 0
     env.start()
     last_obs = env.get_observation()
@@ -78,10 +78,11 @@ def main():
     parser.add_argument('--num_samples', '-n', type=int)
     parser.add_argument('--output', '-o', type=str)
     parser.add_argument('--train_job_name', '-t', type=str)
+    parser.add_argument('--headless', action='store_true')
 
     args = parser.parse_args()
     collect_sample_with_mpc_thread(
-        args.num_samples, args.output, args.train_job_name)
+        args.num_samples, args.output, args.train_job_name, args.headless)
 
 
 if __name__ == '__main__':

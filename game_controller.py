@@ -5,6 +5,7 @@ import json
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.chrome.options import Options
 
 
 class INVALID_ACTION(Exception):
@@ -16,8 +17,15 @@ class GameEnv:
     # You can use this url to run controller in online mode.
     URL = 'http://wayou.github.io/t-rex-runner/'
 
-    def __init__(self, offline=True):
-        self.driver = webdriver.Chrome()
+    def __init__(self, offline=True, headless=False):
+        if headless:
+            chrome_options = webdriver.ChromeOptions()
+            chrome_options.add_argument('--headless')
+            chrome_options.add_argument("--window-size=1920x1080")
+            self.driver = webdriver.Chrome(chrome_options=chrome_options)
+            offline = False
+        else:
+            self.driver = webdriver.Chrome()
         # make driver offine
         if offline:
             self.driver.set_network_conditions(
