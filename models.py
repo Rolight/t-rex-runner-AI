@@ -267,9 +267,6 @@ class HeuristicMPCcontroller(MPCcontroller):
         if state[0] == 1 and state[2] <= 51:
             action = [0, 0.2]
             return action
-        if state[1] > 150:
-            action = [0, self.env_conf['interval_time']]
-            return action
         action, max_alive_p = get_action_and_alive_p(state)
         if max_alive_p >= self.min_tolerance:
             return action
