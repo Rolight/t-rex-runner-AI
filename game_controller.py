@@ -52,7 +52,7 @@ class GameEnv:
         '''
         self.observation_dim = 5
         self.FPS = 60
-        self.interval_time = 1 / self.FPS
+        self.interval_time = 1 / self.FPS / 2
 
         self.HOLDING_KEYCODE = {
             'DOWN': 40,

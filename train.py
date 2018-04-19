@@ -16,19 +16,19 @@ DYNAMIC_MODEL_PARAMS = {
     'activation': 'tanh',
     'output_activation': None,
     'learning_rate': [0.001, 0.001, 0.001],
-    'batch_size': 128,
+    'batch_size': 512,
     'n_layers': 3,
     'size': 128,
     'iterations': 100
 }
 
 SAMPLE_DATA_PATH = './sample.json'
-DATABUFFER_LIMIT = 50000
+DATABUFFER_LIMIT = 100000
 
 TRAIN_PARAMETERS = {
     'sample_size': 30000,
     'collect_data_size': 8000,
-    'collect_threads': 16
+    'collect_threads': 3
 }
 
 
@@ -162,6 +162,9 @@ class TrainJob:
             step 1. Train dynamic model with sample data.
                     After training, save model to disk.
         '''
+        sample_size = self.params['sample_size']
+        sample_size = min(sample_size, self.db[0]._tail)
+        sample_size = min(sample_size, self.db[1]._tail)
         data = np.concatenate(
             [d.sample(sample_size=self.params['sample_size'])
              for d in self.db],

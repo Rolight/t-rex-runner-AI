@@ -11,7 +11,7 @@ def run(brain_name):
     train_job = TrainJob(name=brain_name)
     env = GameEnv()
     mpc = HeuristicMPCcontroller(
-        dyn_model=train_job.dyn_model, sample_size=20, min_tolerance=0.99)
+        dyn_model=train_job.dyn_model, sample_size=20, min_tolerance=0.95)
     # mpc = train_job.mpc
     env.start()
     last_obs = env.get_observation()
